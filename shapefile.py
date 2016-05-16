@@ -81,8 +81,15 @@ def u(v,encoding='utf-8'):
               raise Exception('Unknown input type')
         except: return v
     else:
-        # For python 2 assume str passed in and return str.
-        return v
+        # For python 2 assume str passed in and return unicode.
+        if isinstance(v, str):
+            return v.decode(encoding)
+        elif isinstance(v, unicode):
+            # Already unicode.
+            return v
+        else:
+            # Error.
+            raise Exception('Unknown input type')
 
 def is_string(v):
     if PYTHON3:
@@ -290,11 +297,6 @@ class Reader:
             self.__shpHeader()
         if self.dbf:
             self.__dbfHeader()
-            if self.encoding is None:
-                self.encoding = self.__dbfDetermineCodepage()
-                if self.encoding is None:
-                    # default to utf-8
-                    self.encoding = 'utf-8'
 
     def __getFileObj(self, f):
         """Checks to see if the requested shapefile file object is
@@ -470,6 +472,12 @@ class Reader:
             raise ShapefileException("Shapefile Reader requires a shapefile or file-like object. (no dbf file found)")
         dbf = self.dbf
         headerLength = self.__dbfHeaderLength()
+        # programmer set encoding takes precidence
+        if self.encoding is None:
+            self.encoding = self.__dbfDetermineCodepage()
+        # default to utf-8
+        if self.encoding is None:
+            self.encoding = 'utf-8'
         numFields = (headerLength - 33) // 32
         for field in range(numFields):
             fieldDesc = list(unpack("<11sc4xBB14x", dbf.read(32)))
