@@ -11,6 +11,8 @@ version changelog: Reader.iterShapeRecords() bugfix for Python 3
 __version__ = "1.2.3"
 
 from struct import pack, unpack, calcsize, error
+import codecs
+import encodings.aliases
 import os
 import sys
 import time
@@ -227,11 +229,11 @@ class Reader:
         self.numRecords = None
         self.fields = []
         self.__dbfHdrLength = 0
-        self.encoding = 'utf-8'
+        self.__dbfLangId = None
+        self.cpg_code = None
         
-        if "encoding" in kwargs.keys():
-            self.encoding = kwargs["encoding"]
-            
+        self.encoding = kwargs.get('encoding', None)
+
         # See if a shapefile name was passed as an argument
         if len(args) > 0:
             if is_string(args[0]):
@@ -277,10 +279,22 @@ class Reader:
                 self.dbf = open("%s.dbf" % shapeName, "rb")
             except IOError:
                 raise ShapefileException("Unable to open %s.dbf" % shapeName)
+            try:
+                cpg_fh = open("%s.cpg" % shapeName, "rb")
+                self.cpg_code = cpg_fh.read()
+                cpg_fh.close()
+            except IOError:
+                self.cpg_code = None
+                
         if self.shp:
             self.__shpHeader()
         if self.dbf:
             self.__dbfHeader()
+            if self.encoding is None:
+                self.encoding = self.__dbfDetermineCodepage()
+                if self.encoding is None:
+                    # default to utf-8
+                    self.encoding = 'utf-8'
 
     def __getFileObj(self, f):
         """Checks to see if the requested shapefile file object is
@@ -446,8 +460,8 @@ class Reader:
             if not self.dbf:
                 raise ShapefileException("Shapefile Reader requires a shapefile or file-like object. (no dbf file found)")
             dbf = self.dbf
-            (self.numRecords, self.__dbfHdrLength) = \
-                    unpack("<xxxxLH22x", dbf.read(32))
+            (self.numRecords, self.__dbfHdrLength, self.__dbfLangId) = \
+                    unpack("<xxxxLH19xBxx", dbf.read(32))
         return self.__dbfHdrLength
 
     def __dbfHeader(self):
@@ -533,6 +547,94 @@ class Reader:
                 value = value.strip()
             record.append(value)
         return record
+        
+    def __dbfDetermineCodepage(self):
+        """Cnverts the codepages in .CPG files and the DBF language driver ID
+        (byte 0x1d in header) to a Python code page.
+        
+        returns string of encoding name or returns None"""
+        print('cpg_code: {}  __dbfLangId: {}'.format(self.cpg_code, self.__dbfLangId))
+        if self.cpg_code is None and self.__dbfLangId == 0:
+            return None
+            
+        # LDID is stored at 1Dh in the DBF file
+        # or in the CPG file as prefixed with "LDID/" + 1 binary character value
+
+        # DBF Language Driver Id Code (LDID) maping to Python encodings
+        # based off of this http://shapelib.maptools.org/codepage.html
+        _encoding_lang_driver_ID_table = (
+            ( 'cp437', (1, 9, 11, 13, 15, 17, 21, 24, 25, 27) ),
+            ( 'cp850', (2, 10, 14, 16, 18, 20, 22, 26, 29, 37, 55) ),
+            ( 'cp1250', (3,) ),
+            ( 'mac_roman', (4,) ),
+            ( 'cp865', (8, 23, 103) ),
+            ( 'cp932', (19, 123) ),  # IBM extensions to Shift JIS
+            ( 'cp863', (28, 108) ),
+            ( 'cp852', (34, 35, 64, 100, 135) ),
+            ( 'cp860', (36, ) ),
+            ( 'cp866', (38, 101) ),
+            ( 'gbk', (77, 122) ),
+            ( 'cp949', (78, 121) ),
+            ( 'cp950', (79, 120) ),
+            ( 'iso8859_11', (80, ) ),
+            ( 'latin_1', (87,) ),
+            ( 'cp1252', (88, 89) ),
+            ( 'cp737', (106, 134) ),
+            ( 'cp857', (107, 136) ),
+            ( 'cp874', (124, ) ),
+            ( 'mac_cyrillic', (150, ) ),
+            ( 'mac_latin2', (151, ) ),
+            ( 'cp1250', (200, ) ),
+            ( 'cp1251', (201, ) ),
+            ( 'cp1254', (202, ) ),
+            ( 'cp1253', (203, ) ),
+            ( 'cp1257', (204, ) ),
+        )
+        # This table can be separated from the function if the Writer class needs this
+        
+        # A couple of code pages are not be supported by Python, due to those
+        # code pages *not* being official standards
+
+        # LDID 104  -- Kamenický encoding -- Unsupported by Python
+        # Sometimes called "KEYBCS2" or code page 895
+        # https://en.wikipedia.org/wiki/Kamenick%C3%BD_encoding    
+
+        # LDID 105 -- Mazovia encoding code page 620 -- Unsupported by Python
+        # rejected from being added to python http://bugs.python.org/issue10208
+        # which has code to easily implement this encoding.
+
+        ldid_table = {}
+        
+        # generate ldid_table with ldid as key, the value is Python's name for the encoding
+        for (enc, ldid_tup) in _encoding_lang_driver_ID_table:
+            for ldid in ldid_tup:
+                ldid_table[ldid] = enc
+
+        # try .cpg file first
+        if self.cpg_code is not None:
+            if self.cpg_code.startswith('LDID/'):
+                if self.cpg_code[5] in ldid_table:
+                    return ldid_table[cpg_code[5]]
+
+            # Will the cpg_code have an alias in codecs?
+            try:
+                codecs.lookup(self.cpg_code)
+                return self.cpg_code
+            except LookupError:
+                # try less restrictive matching by stripping out some non-alphanumeric characters
+                cpg_code_nospecial = self.cpg_code.lower().translate(None, '-_ ')
+                for akey in encodings.aliases.aliases:
+                    akey_nospecial = akey.lower().translate(None, '-_ ')
+                    if akey_nospecial == cpg_code_nospecial:
+                        return encodings.aliases.aliases[akey]
+
+        # resort to using language driver id from .dbf file
+        if self.__dbfLangId != 0:  # use the dbf ldid
+            return ldid_table[self.__dbfLangId]
+
+        # failed to lookup, perhaps 'utf-8',  *shrug*
+        # raise LookupError('could not lookup code page')
+        return None
 
     def record(self, i=0):
         """Returns a specific dbf record based on the supplied index."""
