@@ -602,7 +602,7 @@ class Reader:
         # A couple of code pages are not be supported by Python, due to those
         # code pages *not* being official standards
 
-        # LDID 104  -- Kamenický encoding -- Unsupported by Python
+        # LDID 104  -- Kamenicky encoding -- Unsupported by Python
         # Sometimes called "KEYBCS2" or code page 895
         # https://en.wikipedia.org/wiki/Kamenick%C3%BD_encoding    
 
