@@ -561,7 +561,6 @@ class Reader:
         (byte 0x1d in header) to a Python code page.
         
         returns string of encoding name or returns None"""
-        print('cpg_code: {}  __dbfLangId: {}'.format(self.cpg_code, self.__dbfLangId))
         if self.cpg_code is None and self.__dbfLangId == 0:
             return None
             
@@ -576,7 +575,7 @@ class Reader:
             ( 'cp1250', (3,) ),
             ( 'mac_roman', (4,) ),
             ( 'cp865', (8, 23, 103) ),
-            ( 'cp932', (19, 123) ),  # IBM extensions to Shift JIS
+            ( 'cp932', (19, 123) ),
             ( 'cp863', (28, 108) ),
             ( 'cp852', (34, 35, 64, 100, 135) ),
             ( 'cp860', (36, ) ),
