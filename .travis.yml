@@ -1,8 +1,3 @@
-addons:
-  apt:
-    packages:
-      - dos2unix
-
 language: python
 
 python:
@@ -11,8 +6,7 @@ python:
   - '3.4'
   - '3.5'
 
-install: 
-  - dos2unix README.txt
+install:
   - pip install .
 
 script:
